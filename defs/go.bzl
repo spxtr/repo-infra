@@ -1,4 +1,4 @@
-load("@io_bazel_rules_go//go:def.bzl", "go_env_attrs")
+load("@io_bazel_rules_go//go:def.bzl", "go_library", "go_env_attrs")
 
 go_filetype = ["*.go"]
 
@@ -98,3 +98,28 @@ go_genrule = rule(
     output_to_genfiles = True,
     implementation = _go_genrule_impl,
 )
+
+def api_group(name, package, gen_types, tags, deps, srcs, gen_deps=[], extra_peers=[], input_dirs=[]):
+  go_library(
+      name=name,
+      tags=tags,
+      deps=deps + gen_deps,
+      srcs=srcs + [":%s_%s" % (name, gen_type) for gen_type in gen_types],
+  )
+  [go_genrule(
+      name=name + "_" + gen_type,
+      go_deps=deps + gen_deps,
+      srcs=srcs + ["//hack/boilerplate:boilerplate.go.txt"],
+      tools = ["//cmd/libs/go2idl/%s-gen" % gen_type],
+      outs=["zz_generated.%s.go" % gen_type],
+      cmd = " ".join([
+        "$(location //cmd/libs/go2idl/%s-gen)" % gen_type,
+        "--input-dirs k8s.io/kubernetes/%s" % package,
+        "--bounding-dirs k8s.io/kubernetes" if gen_type == "deepcopy" else "",
+        "--output-file-base zz_generated.%s" % gen_type,
+        "--go-header-file $(location //hack/boilerplate:boilerplate.go.txt)",
+        "--extra-peer-dirs " + ",".join(extra_peers) if extra_peers and gen_type == "defaulter" else "",
+        "&&",
+        "cp %s/zz_generated.%s.go $(GENDIR)/%s" % (package, gen_type, package),
+      ]),
+  ) for gen_type in gen_types]
